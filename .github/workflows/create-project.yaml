@@ -29,43 +29,77 @@ jobs:
         && sudo apt update \
         && sudo apt install gh -y
 
-    - name: Parse JSON and Create Project
+    - name: Process JSON files
       env:
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
-        # Son JSON'ı al (gerçekte tüm JSON'ları loop ile işleyebilirsiniz, basit tutmak için sonuncuyu)
-        JSON_FILE=$(ls projects/*.json | tail -1)
-        PROJECT_NAME=$(jq -r '.project_name' $JSON_FILE)
-        PROJECT_TYPE=$(jq -r '.type' $JSON_FILE)
-        DESCRIPTION=$(jq -r '.description' $JSON_FILE)
-        AUTHOR=$(jq -r '.author' $JSON_FILE)
+        # Tüm JSON dosyalarını işle
+        for JSON_FILE in projects/*.json; do
+          if [ -f "$JSON_FILE" ]; then
+            echo "Processing $JSON_FILE"
+            
+            # JSON'dan değişkenleri oku
+            PROJECT_NAME=$(jq -r '.project_name' "$JSON_FILE")
+            PROJECT_TYPE=$(jq -r '.type' "$JSON_FILE")
+            DESCRIPTION=$(jq -r '.description' "$JSON_FILE")
+            AUTHOR=$(jq -r '.author' "$JSON_FILE")
 
-        # Şablon seç
-        if [ "$PROJECT_TYPE" = "llm" ]; then
-          TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git"
-        elif [ "$PROJECT_TYPE" = "ml" ]; then
-          TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git"
-        else
-          TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git"
-        fi
+            # Hata kontrolü: PROJECT_NAME boş mu?
+            if [ -z "$PROJECT_NAME" ]; then
+              echo "Error: PROJECT_NAME is empty in $JSON_FILE"
+              exit 1
+            fi
 
-        # Cookiecutter config'i JSON'dan oluştur (YAML formatında)
-        echo "project_name: $PROJECT_NAME" > config.yaml
-        echo "description: $DESCRIPTION" >> config.yaml
-        echo "author: $AUTHOR" >> config.yaml
-        echo "project_type: $PROJECT_TYPE" >> config.yaml
+            # Şablon seç
+            case "$PROJECT_TYPE" in
+              "llm")
+                TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git"
+                ;;
+              "ml")
+                TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git"
+                ;;
+              "custom")
+                TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git"
+                ;;
+              *)
+                echo "Error: Invalid project_type in $JSON_FILE"
+                exit 1
+                ;;
+            esac
 
-        # Proje üret
-        cookiecutter --no-input --config-file config.yaml $TEMPLATE output_dir=generated
+            # Cookiecutter config'i oluştur
+            echo "project_name: $PROJECT_NAME" > config.yaml
+            echo "description: $DESCRIPTION" >> config.yaml
+            echo "author: $AUTHOR" >> config.yaml
+            echo "project_type: $PROJECT_TYPE" >> config.yaml
 
-        # Yeni repo oluştur
-        gh repo create $PROJECT_NAME --public --description "$DESCRIPTION" --confirm
+            # Debug: Config dosyasını göster
+            echo "Config file content:"
+            cat config.yaml
 
-        # Dosyaları push et
-        cd generated/$PROJECT_NAME
-        git init
-        git add .
-        git commit -m "Initial commit from boilerplate"
-        git remote add origin https://github.com/dogukan1047/$PROJECT_NAME.git
-        git branch -M main
-        git push -u origin main
+            # Proje üret (output_dir olmadan, direkt kök dizine)
+            cookiecutter --no-input --config-file config.yaml "$TEMPLATE"
+            
+            # Debug: Üretilen dosyaları listele
+            echo "Generated files:"
+            ls -R "$PROJECT_NAME"
+
+            # Repo oluştur (herhangi bir argümanla, --confirm yerine)
+            gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
+
+            # Dosyaları push et
+            cd "$PROJECT_NAME" || { echo "Error: Directory $PROJECT_NAME not found"; exit 1; }
+            git init
+            git add .
+            git commit -m "Initial commit from boilerplate"
+            git remote add origin "https://github.com/dogukan1047/$PROJECT_NAME.git"
+            git branch -M main
+            git push -u origin main
+
+            # Geri dön
+            cd ..
+          else
+            echo "No JSON files found"
+            exit 0
+          fi
+        done
