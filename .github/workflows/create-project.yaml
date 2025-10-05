@@ -1,89 +1,95 @@
 name: Create Project from JSON
-
 on:
   push:
     branches: [master]
     paths: ['projects/*.json']
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Install dependencies
-      run: |
-        pip install cookiecutter jq
-
-    - name: Install GitHub CLI
-      run: |
-        type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-        && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-        && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-        && sudo apt update \
-        && sudo apt install gh -y
-
-    - name: Process JSON files
-      env:
-        GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      run: |
-        for JSON_FILE in projects/*.json; do
-          if [ -f "$JSON_FILE" ]; then
-            echo "Processing $JSON_FILE"
-            
-            # JSON'dan değişkenleri oku
-            PROJECT_NAME=$(jq -r '.project_name' "$JSON_FILE")
-            DESCRIPTION=$(jq -r '.description' "$JSON_FILE")
-            AUTHOR=$(jq -r '.author' "$JSON_FILE")
-            PROJECT_TYPE=$(jq -r '.project_type' "$JSON_FILE")
-
-            # Hata kontrolü
-            if [ -z "$PROJECT_NAME" ]; then
-              echo "Error: PROJECT_NAME is empty in $JSON_FILE"
-              exit 1
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install cookiecutter jq
+      
+      - name: Install GitHub CLI
+        run: |
+          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+      
+      - name: Process JSON files
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          for JSON_FILE in projects/*.json; do
+            if [ -f "$JSON_FILE" ]; then
+              echo "Processing $JSON_FILE"
+              
+              # Read variables from JSON
+              PROJECT_NAME=$(jq -r '.project_name' "$JSON_FILE")
+              DESCRIPTION=$(jq -r '.description' "$JSON_FILE")
+              AUTHOR=$(jq -r '.author' "$JSON_FILE")
+              PROJECT_TYPE=$(jq -r '.project_type' "$JSON_FILE")
+              
+              # Error checking
+              if [ -z "$PROJECT_NAME" ]; then
+                echo "Error: PROJECT_NAME is empty in $JSON_FILE"
+                exit 1
+              fi
+              
+              # Select template
+              case "$PROJECT_TYPE" in
+                "llm") TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git";;
+                "ml") TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git";;
+                "custom") TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git";;
+                *) echo "Error: Invalid project_type in $JSON_FILE"; exit 1;;
+              esac
+              
+              # Generate project with Cookiecutter
+              cookiecutter --no-input "$TEMPLATE" project_name="$PROJECT_NAME" description="$DESCRIPTION" author="$AUTHOR"
+              
+              # CRITICAL FIX: Find the actual directory that was created
+              # This handles any slugification that Cookiecutter does
+              PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" -print -quit | sed 's|^\./||')
+              
+              if [ -z "$PROJECT_SLUG" ]; then
+                echo "Error: Could not find generated project directory"
+                echo "Listing current directory contents:"
+                ls -la
+                exit 1
+              fi
+              
+              echo "Found generated project directory: '$PROJECT_SLUG'"
+              echo "Contents:"
+              ls -R "$PROJECT_SLUG"
+              
+              # Create GitHub repository with original name
+              gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
+              
+              # Push files
+              cd "$PROJECT_SLUG" || { echo "Error: Directory $PROJECT_SLUG not found"; exit 1; }
+              git init -b main
+              git add .
+              git commit -m "Initial commit from boilerplate"
+              git remote add origin "https://github.com/dogukan1047/$PROJECT_NAME.git"
+              git push -u origin main
+              
+              # Return to main directory
+              cd ..
+              
+              # Clean up generated directory for next iteration
+              rm -rf "$PROJECT_SLUG"
+              
+              echo "Successfully processed $JSON_FILE"
             fi
-
-            # YEREL KLASÖR ADI İÇİN SLUG OLUŞTUR (ÖNEMLİ DEĞİŞİKLİK)
-            # Cookiecutter'ın oluşturacağı klasör adını tahmin ediyoruz (genellikle küçük harf)
-            PROJECT_SLUG=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
-
-            # Şablon seç
-            case "$PROJECT_TYPE" in
-              "llm") TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git";;
-              "ml") TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git";;
-              "custom") TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git";;
-              *) echo "Error: Invalid project_type in $JSON_FILE"; exit 1;;
-            esac
-
-            # Cookiecutter ile projeyi üret (bu komut aynı kalabilir)
-            # Cookiecutter, config'deki 'project_name'i kullanarak 'PROJECT_SLUG' adında bir klasör oluşturacak
-            cookiecutter --no-input "$TEMPLATE" project_name="$PROJECT_NAME" description="$DESCRIPTION" author="$AUTHOR"
-
-            # Debug: Üretilen dosyaları listele (DEĞİŞTİ)
-            echo "Generated files in '$PROJECT_SLUG':"
-            ls -R "$PROJECT_SLUG"
-
-            # GitHub reposu oluştur (Orijinal, okunaklı isimle)
-            gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
-
-            # Dosyaları push et (DEĞİŞTİ)
-            cd "$PROJECT_SLUG" || { echo "Error: Directory $PROJECT_SLUG not found"; exit 1; }
-            git init -b main
-            git add .
-            git commit -m "Initial commit from boilerplate"
-            # Remote URL'de orijinal repo adını kullan
-            git remote add origin "https://github.com/dogukan1047/$PROJECT_NAME.git"
-            git push -u origin main
-
-            # Ana dizine geri dön
-            cd ..
-            # Bir sonraki döngü için oluşturulan klasörü temizle
-            rm -rf "$PROJECT_SLUG"
-          fi
-        done
+          done
