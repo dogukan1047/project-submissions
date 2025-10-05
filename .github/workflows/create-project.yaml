@@ -29,8 +29,8 @@ jobs:
       
       - name: Configure Git
         run: |
-          git config --global user.email "dogukanpolatel1047@gmail.com"
-          git config --global user.name "dogukan1047"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Actions Bot"
       
       - name: Process JSON files
         env:
@@ -86,7 +86,8 @@ jobs:
               git init -b main
               git add .
               git commit -m "Initial commit from boilerplate"
-              git remote add origin "https://github.com/dogukan1047/$PROJECT_NAME.git"
+              # Use token authentication for push
+              git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/dogukan1047/$PROJECT_NAME.git"
               git push -u origin main
               
               # Return to main directory
