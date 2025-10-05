@@ -1,7 +1,8 @@
 {
   "project_name": "MyLLMProject",
   "description": "An LLM experiment",
-  "author": "Jane Doe",
+  "author": "Dodo",
   "type": "llm",
   "additional_params": {}  
 }
+
