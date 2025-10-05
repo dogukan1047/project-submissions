@@ -40,7 +40,7 @@ jobs:
             
             # JSON'dan değişkenleri oku
             PROJECT_NAME=$(jq -r '.project_name' "$JSON_FILE")
-            PROJECT_TYPE=$(jq -r '.type' "$JSON_FILE")
+            PROJECT_TYPE=$(jq -r '.project_type' "$JSON_FILE")
             DESCRIPTION=$(jq -r '.description' "$JSON_FILE")
             AUTHOR=$(jq -r '.author' "$JSON_FILE")
 
