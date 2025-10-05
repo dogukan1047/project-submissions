@@ -1,0 +1,71 @@
+name: Create Project from JSON
+
+on:
+  push:
+    branches: [main]
+    paths: ['projects/*.json']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install cookiecutter jq
+
+    - name: Install GitHub CLI
+      run: |
+        type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+        && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+        && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+        && sudo apt update \
+        && sudo apt install gh -y
+
+    - name: Parse JSON and Create Project
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        # Son JSON'ı al (gerçekte tüm JSON'ları loop ile işleyebilirsiniz, basit tutmak için sonuncuyu)
+        JSON_FILE=$(ls projects/*.json | tail -1)
+        PROJECT_NAME=$(jq -r '.project_name' $JSON_FILE)
+        PROJECT_TYPE=$(jq -r '.type' $JSON_FILE)
+        DESCRIPTION=$(jq -r '.description' $JSON_FILE)
+        AUTHOR=$(jq -r '.author' $JSON_FILE)
+
+        # Şablon seç
+        if [ "$PROJECT_TYPE" = "llm" ]; then
+          TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git"
+        elif [ "$PROJECT_TYPE" = "ml" ]; then
+          TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git"
+        else
+          TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git"
+        fi
+
+        # Cookiecutter config'i JSON'dan oluştur (YAML formatında)
+        echo "project_name: $PROJECT_NAME" > config.yaml
+        echo "description: $DESCRIPTION" >> config.yaml
+        echo "author: $AUTHOR" >> config.yaml
+        echo "project_type: $PROJECT_TYPE" >> config.yaml
+
+        # Proje üret
+        cookiecutter --no-input --config-file config.yaml $TEMPLATE output_dir=generated
+
+        # Yeni repo oluştur
+        gh repo create $PROJECT_NAME --public --description "$DESCRIPTION" --confirm
+
+        # Dosyaları push et
+        cd generated/$PROJECT_NAME
+        git init
+        git add .
+        git commit -m "Initial commit from boilerplate"
+        git remote add origin https://github.com/dogukan1047/$PROJECT_NAME.git
+        git branch -M main
+        git push -u origin main
