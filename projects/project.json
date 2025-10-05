@@ -2,8 +2,7 @@
   "project_name": "MyLLMProject",
   "description": "An LLM experiment",
   "author": "Dodo",
-  "type": "llm",
-  "additional_params": {}  
+  "type": "llm"
 }
 
 
