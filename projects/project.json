@@ -1,8 +1,8 @@
 {
-  "project_name": "MyLLMProject",
+  "project_name": "FirstLLMProject",
   "description": "An LLM experiment",
   "author": "Dodo",
-  "type": "llm"
+  "project_type": "llm"
 }
 
 
