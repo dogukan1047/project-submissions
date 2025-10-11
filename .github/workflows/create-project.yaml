@@ -2,7 +2,7 @@ name: Create Project from JSON
 on:
   push:
     branches: [master]
-    paths: ['projects/projects.json']  
+    paths: ['projects/project.json']  
 jobs:
   build:
     runs-on: ubuntu-latest
