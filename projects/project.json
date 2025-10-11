@@ -1,15 +1,14 @@
-{
-  "project_name": "FirstLLMProject",
-  "description": "An LLM experiment",
-  "author": "Dodo",
-  "project_type": "llm"
-}
-
-
-
-
-
-
-
-
-
+[
+  {
+    "project_name": "FirstLLMProject",
+    "description": "An LLM experiment",
+    "author": "Dodo",
+    "project_type": "llm"
+  },
+  {
+    "project_name": "TryAutomation",
+    "description": "An LLM experiment",
+    "author": "svc_dodo",
+    "project_type": "llm"
+  }
+]
