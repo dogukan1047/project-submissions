@@ -37,30 +37,12 @@ jobs:
           fi
 
           echo "Processing $JSON_FILE"
-          echo "JSON file content:"
-          cat "$JSON_FILE"
-          echo ""
 
-          # JSON formatını kontrol et (array mı object mi?)
-          IS_ARRAY=$(jq -r 'if type == "array" then "true" else "false" end' "$JSON_FILE")
+          PROJECT_COUNT=$(jq length "$JSON_FILE")
 
-          if [ "$IS_ARRAY" == "true" ]; then
-            echo "Detected array format with multiple projects"
-            PROJECT_COUNT=$(jq 'length' "$JSON_FILE")
-            echo "Total projects to process: $PROJECT_COUNT"
-          else
-            echo "Detected single object format - wrapping in array"
-            # Tek objeyi array'e çevir
-            jq -s '.' "$JSON_FILE" > "${JSON_FILE}.tmp"
-            mv "${JSON_FILE}.tmp" "$JSON_FILE"
-            PROJECT_COUNT=1
-          fi
-
-          # Şimdi her zaman array formatında işle
           for ((i=0; i<$PROJECT_COUNT; i++)); do
-            echo "====================================================="
+            echo "-----------------------------------------------------"
             echo "Processing project index $i"
-            echo "====================================================="
 
             PROJECT_NAME=$(jq -r ".[$i].project_name" "$JSON_FILE")
             DESCRIPTION=$(jq -r ".[$i].description" "$JSON_FILE")
@@ -72,55 +54,28 @@ jobs:
             GPU_COUNT=$(jq -r ".[$i].gpu_count" "$JSON_FILE")
             MLFLOW_ENABLED=$(jq -r ".[$i].mlflow_enabled" "$JSON_FILE")
             DEPLOY_ENABLED=$(jq -r ".[$i].deploy_enabled" "$JSON_FILE")
-            CPU_LIMIT=$(jq -r ".[$i].cpu_limit // \"2\"" "$JSON_FILE")
-            CPU_REQUEST=$(jq -r ".[$i].cpu_request // \"1\"" "$JSON_FILE")
-            MEMORY_LIMIT=$(jq -r ".[$i].memory_limit // \"4Gi\"" "$JSON_FILE")
-            MEMORY_REQUEST=$(jq -r ".[$i].memory_request // \"2Gi\"" "$JSON_FILE")
-            STORAGE_SIZE=$(jq -r ".[$i].storage_size // \"5Gi\"" "$JSON_FILE")
 
-            if [ -z "$PROJECT_NAME" ] || [ "$PROJECT_NAME" == "null" ]; then
+            if [ -z "$PROJECT_NAME" ]; then
               echo "Error: PROJECT_NAME is empty for project index $i. Skipping."
               continue
             fi
 
-            echo "Project Configuration:"
-            echo "  Name: $PROJECT_NAME"
-            echo "  Type: $PROJECT_TYPE"
-            echo "  Description: $DESCRIPTION"
-            echo "  Author: $AUTHOR"
-            echo "  GPU: $USE_GPU (count: $GPU_COUNT)"
-            echo "  Deploy: $DEPLOY_ENABLED"
-
-            echo ""
             echo "Checking if repository '$GH_OWNER/$PROJECT_NAME' already exists..."
             if gh repo view "$GH_OWNER/$PROJECT_NAME" > /dev/null 2>&1; then
-              echo "✗ Repository '$GH_OWNER/$PROJECT_NAME' already exists. Skipping."
+              echo "Repository '$GH_OWNER/$PROJECT_NAME' already exists. Skipping this project."
               continue
             fi
-            echo "✓ Repository does not exist. Proceeding with creation."
+            echo "Repository does not exist. Proceeding with creation."
 
             case "$PROJECT_TYPE" in
               "llm") TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git";;
               "ml") TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git";;
               "custom") TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git";;
-              *) 
-                echo "✗ Error: Invalid project_type '$PROJECT_TYPE' for project index $i. Skipping."
-                continue
-                ;;
+              *) echo "Error: Invalid project_type '$PROJECT_TYPE' for project index $i. Skipping."; continue;;
             esac
 
-            echo "Using template: $TEMPLATE"
-
-            # Geçici dizin oluştur
-            TEMP_DIR="temp_project_${i}_$$"
-            mkdir -p "$TEMP_DIR"
-
-            echo ""
-            echo "Creating project from cookiecutter template..."
-            
             # Cookiecutter ile proje oluştur
-            if ! cookiecutter --no-input "$TEMPLATE" \
-              --output-dir "$TEMP_DIR" \
+            cookiecutter --no-input "$TEMPLATE" \
               project_name="$PROJECT_NAME" \
               description="$DESCRIPTION" \
               author="$AUTHOR" \
@@ -128,114 +83,59 @@ jobs:
               base_image_type="$BASE_IMAGE_TYPE" \
               use_gpu="$USE_GPU" \
               gpu_count="$GPU_COUNT" \
-              mlflow_enabled="$MLFLOW_ENABLED" \
-              cpu_limit="$CPU_LIMIT" \
-              cpu_request="$CPU_REQUEST" \
-              memory_limit="$MEMORY_LIMIT" \
-              memory_request="$MEMORY_REQUEST" \
-              storage_size="$STORAGE_SIZE"; then
-              echo "✗ Error: Cookiecutter failed for project $PROJECT_NAME"
-              rm -rf "$TEMP_DIR"
-              exit 1
-            fi
+              mlflow_enabled="$MLFLOW_ENABLED"
 
-            echo "✓ Project created successfully"
-
-            # Oluşturulan proje dizinini bul
-            PROJECT_SLUG=$(find "$TEMP_DIR" -maxdepth 1 -mindepth 1 -type d -print -quit | xargs basename)
+            PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" -print -quit | sed 's|^\./||')
 
             if [ -z "$PROJECT_SLUG" ]; then
-              echo "✗ Error: Could not find generated project directory"
-              echo "Contents of $TEMP_DIR:"
-              ls -la "$TEMP_DIR"
-              rm -rf "$TEMP_DIR"
+              echo "Error: Could not find generated project directory for project $PROJECT_NAME"
+              ls -la
               exit 1
             fi
-            
             echo "Generated project directory: '$PROJECT_SLUG'"
-            PROJECT_PATH="$TEMP_DIR/$PROJECT_SLUG"
 
             # Yeni repo oluştur
-            echo ""
-            echo "Creating GitHub repository: $GH_OWNER/$PROJECT_NAME"
-            if ! gh repo create "$GH_OWNER/$PROJECT_NAME" --public --description "$DESCRIPTION"; then
-              echo "✗ Error: Failed to create GitHub repository"
-              rm -rf "$TEMP_DIR"
-              exit 1
-            fi
-            echo "✓ Repository created"
+            gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
 
             # Dosyaları push et
-            echo ""
-            echo "Initializing and pushing to GitHub..."
-            cd "$PROJECT_PATH" || { echo "✗ Error: Cannot access $PROJECT_PATH"; exit 1; }
-            
+            cd "$PROJECT_SLUG" || { echo "Error: Directory $PROJECT_SLUG not found"; exit 1; }
             git init -b main
             git add .
             git commit -m "Initial commit from boilerplate"
             git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GH_OWNER}/$PROJECT_NAME.git"
-            
-            if ! git push -u origin main; then
-              echo "✗ Error: Failed to push to GitHub"
-              cd - > /dev/null
-              rm -rf "$TEMP_DIR"
-              exit 1
-            fi
-            
-            echo "✓ Code pushed to GitHub"
-            cd - > /dev/null
+            git push -u origin main
 
-            # Deployment adımı
+            # Deployment adımı (dizin silinmeden ÖNCE)
             if [ "$DEPLOY_ENABLED" == "true" ]; then
-              echo ""
               echo "Deploying project $PROJECT_NAME to Kubernetes..."
               
               # Kubeconfig ayarla
-              KUBECONFIG_FILE="kubeconfig_${i}_$$.yaml"
-              if ! echo "$KUBECONFIG" | base64 -d > "$KUBECONFIG_FILE"; then
-                echo "✗ Error: Failed to decode KUBECONFIG"
-                rm -rf "$TEMP_DIR"
-                exit 1
-              fi
-              export KUBECONFIG="$(pwd)/$KUBECONFIG_FILE"
+              echo "$KUBECONFIG" | base64 -d > ../kubeconfig.yaml
+              export KUBECONFIG=../kubeconfig.yaml
 
-              # Kustomize dizinine git
-              KUSTOMIZE_DIR="$PROJECT_PATH/kustomize"
-              
-              if [ -d "$KUSTOMIZE_DIR" ]; then
-                cd "$KUSTOMIZE_DIR" || { 
-                  echo "✗ Error: Cannot access kustomize directory"
-                  rm -f "$KUBECONFIG_FILE"
-                  rm -rf "$TEMP_DIR"
-                  exit 1
-                }
-                
-                echo "Building and applying Kubernetes resources..."
-                if kubectl kustomize . | kubectl apply -f -; then
-                  echo "✓ Deployment completed successfully"
-                else
-                  echo "✗ Warning: Deployment failed"
-                fi
-                
-                cd - > /dev/null
+              # Kustomize ile YAML'ları oluştur ve apply et
+              if [ -d "kustomize" ]; then
+                cd kustomize || { echo "Error: Cannot enter kustomize directory"; exit 1; }
+                kustomize build . | kubectl apply -f -
+                cd ..
+                echo "Deployment completed for $PROJECT_NAME"
               else
-                echo "⚠ Warning: kustomize directory not found. Skipping deployment."
+                echo "Warning: kustomize directory not found in $PROJECT_SLUG"
               fi
-              
-              # Kubeconfig dosyasını temizle
-              rm -f "$KUBECONFIG_FILE"
             else
-              echo ""
-              echo "⊘ Deployment skipped (deploy_enabled is false)"
+              echo "Deployment skipped for $PROJECT_NAME (deploy_enabled is false)"
             fi
+          
+            cd ..
 
-            # Proje dizinini temizle
-            rm -rf "$TEMP_DIR"
+            # Proje dizinini temizle (deployment'tan SONRA sil)
+            rm -rf "$PROJECT_SLUG"
 
-            echo ""
-            echo "✓ Successfully completed project: $PROJECT_NAME"
+            # Kubeconfig dosyasını temizle
+            rm -f kubeconfig.yaml
+
+            echo "Successfully created project: $PROJECT_NAME"
           done
 
-          echo "====================================================="
-          echo "✓ Finished processing all projects"
-          echo "====================================================="
+          echo "-----------------------------------------------------"
+          echo "Finished processing all projects in $JSON_FILE"
