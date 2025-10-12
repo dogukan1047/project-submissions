@@ -21,6 +21,10 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install cookiecutter jq
+          
+          # Virtual environment'ın aktif olduğunu doğrula
+          which cookiecutter
+          which python
 
       - name: Process JSON file and create projects
         env:
@@ -43,6 +47,9 @@ jobs:
           for ((i=0; i<$PROJECT_COUNT; i++)); do
             echo "-----------------------------------------------------"
             echo "Processing project index $i"
+            
+            # Virtual environment'ı tekrar aktif et (her iterasyonda)
+            source venv/bin/activate
 
             PROJECT_NAME=$(jq -r ".[$i].project_name" "$JSON_FILE")
             DESCRIPTION=$(jq -r ".[$i].description" "$JSON_FILE")
@@ -85,14 +92,21 @@ jobs:
               gpu_count="$GPU_COUNT" \
               mlflow_enabled="$MLFLOW_ENABLED"
 
-            PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" -print -quit | sed 's|^\./||')
+            PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" ! -name "venv" ! -name ".*" -print -quit | sed 's|^\./||')
 
             if [ -z "$PROJECT_SLUG" ]; then
               echo "Error: Could not find generated project directory for project $PROJECT_NAME"
+              echo "Current directory contents:"
               ls -la
               exit 1
             fi
             echo "Generated project directory: '$PROJECT_SLUG'"
+            
+            # PROJECT_SLUG'ın gerçekten bir dizin olduğunu doğrula
+            if [ ! -d "$PROJECT_SLUG" ]; then
+              echo "Error: $PROJECT_SLUG is not a directory"
+              exit 1
+            fi
 
             # Yeni repo oluştur
             gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
