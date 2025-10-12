@@ -148,11 +148,34 @@ jobs:
               if [ -d "kustomize" ]; then
                 cd kustomize || { echo "Error: Cannot enter kustomize directory"; exit 1; }
                 
-                # kubectl kustomize kullan (kubectl 1.14+)
-                kubectl apply -k . || {
-                  echo "Error: kubectl apply -k failed"
+                # Kustomize dizin yapısını kontrol et
+                echo "Kustomize directory contents:"
+                ls -la
+                
+                # kustomization.yaml dosyasını bul
+                if [ -f "kustomization.yaml" ] || [ -f "kustomization.yml" ] || [ -f "Kustomization" ]; then
+                  echo "Found kustomization file, applying..."
+                  kubectl apply -k . || {
+                    echo "Error: kubectl apply -k failed"
+                    echo "Checking kustomization.yaml content:"
+                    cat kustomization.yaml 2>/dev/null || cat kustomization.yml 2>/dev/null || cat Kustomization 2>/dev/null
+                    exit 1
+                  }
+                elif [ -d "interactive" ]; then
+                  # Alt dizinlerde kustomization varsa
+                  echo "Applying interactive environment..."
+                  kubectl apply -k interactive/
+                  
+                  if [ -d "production-training" ] && [ -f "production-training/kustomization.yaml" ]; then
+                    echo "Applying production training environment..."
+                    kubectl apply -k production-training/
+                  fi
+                else
+                  echo "Error: No kustomization.yaml found in kustomize directory"
+                  echo "Directory structure:"
+                  find . -type f -name "*.yaml" -o -name "*.yml"
                   exit 1
-                }
+                fi
                 
                 cd ..
                 echo "Deployment completed for $PROJECT_NAME"
