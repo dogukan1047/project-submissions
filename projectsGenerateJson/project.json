@@ -1,6 +1,6 @@
 [
   {
-    "project_name": "sentiment-analysis",
+    "project_name": "sentiment-analysis_v2",
     "description": "Twitter sentiment analysis with BERT",
     "author": "dodo",
     "project_type": "llm",
