@@ -1,20 +1,26 @@
 [
   {
-    "project_name": "FirstLLMProject",
-    "description": "An LLM experiment",
-    "author": "Dodo",
-    "project_type": "llm"
+    "project_name": "sentiment-analysis",
+    "description": "Twitter sentiment analysis with BERT",
+    "author": "dodo",
+    "project_type": "llm",
+    "docker_registry": "dogukanpolatel",
+    "base_image_type": "jupyter",
+    "use_gpu": true,
+    "gpu_count": 1,
+    "mlflow_enabled": true,
+    "deploy_enabled": true
   },
   {
-    "project_name": "TryAutomation12",
-    "description": "An LLM experiment",
-    "author": "svc_dodo",
-    "project_type": "llm"
-  },
-  {
-    "project_name": "TryAutomationV1",
-    "description": "An LLM experiment",
-    "author": "svc_dodo",
-    "project_type": "llm"
+    "project_name": "image-classification",
+    "description": "Image classification with CNN",
+    "author": "dodo",
+    "project_type": "ml",
+    "docker_registry": "dogukanpolatel",
+    "base_image_type": "vscode",
+    "use_gpu": false,
+    "gpu_count": 0,
+    "mlflow_enabled": false,
+    "deploy_enabled": false
   }
 ]

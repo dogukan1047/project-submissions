@@ -1,4 +1,4 @@
-name: Create Project from JSON
+name: Create Project and Deploy
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths: ['projectsGenerateJson/project.json']
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: self-hosted
     permissions:
       contents: write
@@ -15,34 +15,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install cookiecutter jq
-
-      - name: Install GitHub CLI
-        run: |
-          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-          && sudo apt update \
-          && sudo apt install gh -y
-
-      - name: Configure Git
-        run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "GitHub Actions Bot"
-
       - name: Process JSON file and create projects
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GH_OWNER: "dogukan1047"
+          KUBECONFIG: ${{ secrets.KUBECONFIG }}
         run: |
           JSON_FILE="projectsGenerateJson/project.json"
 
@@ -53,7 +30,7 @@ jobs:
 
           echo "Processing $JSON_FILE"
 
-          PROJECT_COUNT=$(jq '. | length' "$JSON_FILE")
+          PROJECT_COUNT=$(jq length "$JSON_FILE")
 
           for ((i=0; i<$PROJECT_COUNT; i++)); do
             echo "-----------------------------------------------------"
@@ -63,10 +40,16 @@ jobs:
             DESCRIPTION=$(jq -r ".[$i].description" "$JSON_FILE")
             AUTHOR=$(jq -r ".[$i].author" "$JSON_FILE")
             PROJECT_TYPE=$(jq -r ".[$i].project_type" "$JSON_FILE")
+            DOCKER_REGISTRY=$(jq -r ".[$i].docker_registry" "$JSON_FILE")
+            BASE_IMAGE_TYPE=$(jq -r ".[$i].base_image_type" "$JSON_FILE")
+            USE_GPU=$(jq -r ".[$i].use_gpu" "$JSON_FILE")
+            GPU_COUNT=$(jq -r ".[$i].gpu_count" "$JSON_FILE")
+            MLFLOW_ENABLED=$(jq -r ".[$i].mlflow_enabled" "$JSON_FILE")
+            DEPLOY_ENABLED=$(jq -r ".[$i].deploy_enabled" "$JSON_FILE")
 
             if [ -z "$PROJECT_NAME" ]; then
               echo "Error: PROJECT_NAME is empty for project index $i. Skipping."
-              continue # Bu projeyi atla, bir sonrakine geç
+              continue
             fi
 
             echo "Checking if repository '$GH_OWNER/$PROJECT_NAME' already exists..."
@@ -83,31 +66,60 @@ jobs:
               *) echo "Error: Invalid project_type '$PROJECT_TYPE' for project index $i. Skipping."; continue;;
             esac
 
-            cookiecutter --no-input "$TEMPLATE" project_name="$PROJECT_NAME" description="$DESCRIPTION" author="$AUTHOR"
+            # Cookiecutter ile proje oluştur
+            cookiecutter --no-input "$TEMPLATE" \
+              project_name="$PROJECT_NAME" \
+              description="$DESCRIPTION" \
+              author="$AUTHOR" \
+              docker_registry="$DOCKER_REGISTRY" \
+              base_image_type="$BASE_IMAGE_TYPE" \
+              use_gpu="$USE_GPU" \
+              gpu_count="$GPU_COUNT" \
+              mlflow_enabled="$MLFLOW_ENABLED"
 
             PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" -print -quit | sed 's|^\./||')
 
             if [ -z "$PROJECT_SLUG" ]; then
               echo "Error: Could not find generated project directory for project $PROJECT_NAME"
               ls -la
-              exit 1 # Bu kritik bir hata, bu yüzden akışı durduruyoruz.
+              exit 1
             fi
             echo "Generated project directory: '$PROJECT_SLUG'"
 
+            # Yeni repo oluştur
             gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
 
+            # Dosyaları push et
             cd "$PROJECT_SLUG" || { echo "Error: Directory $PROJECT_SLUG not found"; exit 1; }
             git init -b main
             git add .
             git commit -m "Initial commit from boilerplate"
             git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GH_OWNER}/$PROJECT_NAME.git"
             git push -u origin main
-            
+          
             cd ..
 
+            # Proje dizinini temizle (localden sil)
             rm -rf "$PROJECT_SLUG"
 
-            echo "Successfully processed and created project: $PROJECT_NAME"
+            echo "Successfully created project: $PROJECT_NAME"
+
+            # Deployment adımı (eğer deploy_enabled true ise)
+            if [ "$DEPLOY_ENABLED" == "true" ]; then
+              echo "Deploying project $PROJECT_NAME to Kubernetes..."
+              # Kubeconfig ayarla
+              echo "$KUBECONFIG" | base64 -d > kubeconfig.yaml
+              export KUBECONFIG=kubeconfig.yaml
+
+              # Kustomize ile YAML’ları oluştur ve apply et
+              cd "$PROJECT_SLUG/kustomize" || { echo "Error: kustomize directory not found"; exit 1; }
+              kustomize build . | kubectl apply -f -
+              cd ../..
+
+              echo "Deployment completed for $PROJECT_NAME"
+            else
+              echo "Deployment skipped for $PROJECT_NAME (deploy_enabled is false)"
+            fi
           done
 
           echo "-----------------------------------------------------"
