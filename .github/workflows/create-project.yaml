@@ -22,9 +22,13 @@ jobs:
           pip install --upgrade pip
           pip install cookiecutter jq
           
+          # Helm kurulumu
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          
           # Virtual environment'ın aktif olduğunu doğrula
           which cookiecutter
           which python
+          which helm
 
       - name: Process JSON file and create projects
         env:
@@ -154,9 +158,9 @@ jobs:
                 
                 # kustomization.yaml dosyasını bul
                 if [ -f "kustomization.yaml" ] || [ -f "kustomization.yml" ] || [ -f "Kustomization" ]; then
-                  echo "Found kustomization file, applying..."
-                  kubectl apply -k . || {
-                    echo "Error: kubectl apply -k failed"
+                  echo "Found kustomization file, applying with Helm support..."
+                  kubectl kustomize . --enable-helm | kubectl apply -f - || {
+                    echo "Error: kubectl apply failed"
                     echo "Checking kustomization.yaml content:"
                     cat kustomization.yaml 2>/dev/null || cat kustomization.yml 2>/dev/null || cat Kustomization 2>/dev/null
                     exit 1
@@ -164,11 +168,25 @@ jobs:
                 elif [ -d "interactive" ]; then
                   # Alt dizinlerde kustomization varsa
                   echo "Applying interactive environment..."
-                  kubectl apply -k interactive/
+                  
+                  # Namespace oluştur
+                  kubectl create namespace "$PROJECT_NAME" --dry-run=client -o yaml | kubectl apply -f -
+                  
+                  # Helm chart'ı kustomize ile apply et
+                  if [ -f "interactive/kustomization.yaml" ]; then
+                    # Environment variable'ları set et
+                    export PROJECT_NAME="$PROJECT_NAME"
+                    
+                    kubectl kustomize interactive/ --enable-helm | kubectl apply -f - || {
+                      echo "Error: Failed to apply interactive environment"
+                      cat interactive/kustomization.yaml
+                      exit 1
+                    }
+                  fi
                   
                   if [ -d "production-training" ] && [ -f "production-training/kustomization.yaml" ]; then
                     echo "Applying production training environment..."
-                    kubectl apply -k production-training/
+                    kubectl kustomize production-training/ --enable-helm | kubectl apply -f -
                   fi
                 else
                   echo "Error: No kustomization.yaml found in kustomize directory"
