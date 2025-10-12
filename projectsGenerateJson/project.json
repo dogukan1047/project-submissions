@@ -34,7 +34,7 @@
     "storage_size": "10Gi"
   },
   {
-    "project_name": "image-classification_v2253",
+    "project_name": "image-classification_v22443",
     "description": "ResNet image classifier",
     "author": "dodo",
     "project_type": "llm",
