@@ -1,4 +1,5 @@
-{
+[
+  {
     "project_name": "sentiment-analysis",
     "description": "Twitter sentiment analysis with BERT",
     "author": "dodo",
@@ -15,4 +16,4 @@
     "memory_request": "2Gi",
     "storage_size": "5Gi"
   }
-
+]
