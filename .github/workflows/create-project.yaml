@@ -61,11 +61,22 @@ jobs:
             GPU_COUNT=$(jq -r ".[$i].gpu_count" "$JSON_FILE")
             MLFLOW_ENABLED=$(jq -r ".[$i].mlflow_enabled" "$JSON_FILE")
             DEPLOY_ENABLED=$(jq -r ".[$i].deploy_enabled" "$JSON_FILE")
+            CPU_LIMIT=$(jq -r ".[$i].cpu_limit" "$JSON_FILE")
+            CPU_REQUEST=$(jq -r ".[$i].cpu_request" "$JSON_FILE")
+            MEMORY_LIMIT=$(jq -r ".[$i].memory_limit" "$JSON_FILE")
+            MEMORY_REQUEST=$(jq -r ".[$i].memory_request" "$JSON_FILE")
+            STORAGE_SIZE=$(jq -r ".[$i].storage_size" "$JSON_FILE")
 
             if [ -z "$PROJECT_NAME" ]; then
               echo "Error: PROJECT_NAME is empty for project index $i. Skipping."
               continue
             fi
+            
+            echo "Project configuration:"
+            echo "  - PROJECT_NAME: $PROJECT_NAME"
+            echo "  - DEPLOY_ENABLED: $DEPLOY_ENABLED"
+            echo "  - USE_GPU: $USE_GPU"
+            echo "  - GPU_COUNT: $GPU_COUNT"
 
             echo "Checking if repository '$GH_OWNER/$PROJECT_NAME' already exists..."
             if gh repo view "$GH_OWNER/$PROJECT_NAME" > /dev/null 2>&1; then
@@ -90,7 +101,13 @@ jobs:
               base_image_type="$BASE_IMAGE_TYPE" \
               use_gpu="$USE_GPU" \
               gpu_count="$GPU_COUNT" \
-              mlflow_enabled="$MLFLOW_ENABLED"
+              mlflow_enabled="$MLFLOW_ENABLED" \
+              deploy_enabled="$DEPLOY_ENABLED" \
+              cpu_limit="$CPU_LIMIT" \
+              cpu_request="$CPU_REQUEST" \
+              memory_limit="$MEMORY_LIMIT" \
+              memory_request="$MEMORY_REQUEST" \
+              storage_size="$STORAGE_SIZE"
 
             PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" ! -name "venv" ! -name ".*" -print -quit | sed 's|^\./||')
 
