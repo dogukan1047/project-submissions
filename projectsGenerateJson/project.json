@@ -20,7 +20,7 @@
     "project_name": "image-classification",
     "description": "ResNet image classifier",
     "author": "dodo",
-    "project_type": "ml",
+    "project_type": "llm",
     "docker_registry": "dogukanpolatel",
     "base_image_type": "python",
     "use_gpu": true,
