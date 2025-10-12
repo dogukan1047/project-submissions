@@ -54,8 +54,13 @@ jobs:
             GPU_COUNT=$(jq -r ".[$i].gpu_count" "$JSON_FILE")
             MLFLOW_ENABLED=$(jq -r ".[$i].mlflow_enabled" "$JSON_FILE")
             DEPLOY_ENABLED=$(jq -r ".[$i].deploy_enabled" "$JSON_FILE")
+            CPU_LIMIT=$(jq -r ".[$i].cpu_limit // \"2\"" "$JSON_FILE")
+            CPU_REQUEST=$(jq -r ".[$i].cpu_request // \"1\"" "$JSON_FILE")
+            MEMORY_LIMIT=$(jq -r ".[$i].memory_limit // \"4Gi\"" "$JSON_FILE")
+            MEMORY_REQUEST=$(jq -r ".[$i].memory_request // \"2Gi\"" "$JSON_FILE")
+            STORAGE_SIZE=$(jq -r ".[$i].storage_size // \"5Gi\"" "$JSON_FILE")
 
-            if [ -z "$PROJECT_NAME" ]; then
+            if [ -z "$PROJECT_NAME" ] || [ "$PROJECT_NAME" == "null" ]; then
               echo "Error: PROJECT_NAME is empty for project index $i. Skipping."
               continue
             fi
@@ -74,8 +79,13 @@ jobs:
               *) echo "Error: Invalid project_type '$PROJECT_TYPE' for project index $i. Skipping."; continue;;
             esac
 
+            # Geçici dizin oluştur
+            TEMP_DIR="temp_project_$i"
+            mkdir -p "$TEMP_DIR"
+
             # Cookiecutter ile proje oluştur
             cookiecutter --no-input "$TEMPLATE" \
+              --output-dir "$TEMP_DIR" \
               project_name="$PROJECT_NAME" \
               description="$DESCRIPTION" \
               author="$AUTHOR" \
@@ -83,51 +93,78 @@ jobs:
               base_image_type="$BASE_IMAGE_TYPE" \
               use_gpu="$USE_GPU" \
               gpu_count="$GPU_COUNT" \
-              mlflow_enabled="$MLFLOW_ENABLED"
+              mlflow_enabled="$MLFLOW_ENABLED" \
+              cpu_limit="$CPU_LIMIT" \
+              cpu_request="$CPU_REQUEST" \
+              memory_limit="$MEMORY_LIMIT" \
+              memory_request="$MEMORY_REQUEST" \
+              storage_size="$STORAGE_SIZE"
 
-            PROJECT_SLUG=$(find . -maxdepth 1 -type d -newer "$JSON_FILE" ! -name "." ! -name ".." ! -name ".git" ! -name "projects" -print -quit | sed 's|^\./||')
+            # Oluşturulan proje dizinini bul
+            PROJECT_SLUG=$(find "$TEMP_DIR" -maxdepth 1 -type d ! -name "$TEMP_DIR" -print -quit | xargs basename)
 
             if [ -z "$PROJECT_SLUG" ]; then
               echo "Error: Could not find generated project directory for project $PROJECT_NAME"
-              ls -la
+              ls -la "$TEMP_DIR"
+              rm -rf "$TEMP_DIR"
               exit 1
             fi
+            
             echo "Generated project directory: '$PROJECT_SLUG'"
+            PROJECT_PATH="$TEMP_DIR/$PROJECT_SLUG"
 
             # Yeni repo oluştur
-            gh repo create "$PROJECT_NAME" --public --description "$DESCRIPTION"
+            echo "Creating GitHub repository..."
+            gh repo create "$GH_OWNER/$PROJECT_NAME" --public --description "$DESCRIPTION"
 
             # Dosyaları push et
-            cd "$PROJECT_SLUG" || { echo "Error: Directory $PROJECT_SLUG not found"; exit 1; }
+            cd "$PROJECT_PATH" || { echo "Error: Directory $PROJECT_PATH not found"; exit 1; }
+            
+            echo "Initializing git repository..."
             git init -b main
             git add .
             git commit -m "Initial commit from boilerplate"
             git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GH_OWNER}/$PROJECT_NAME.git"
+            
+            echo "Pushing to GitHub..."
             git push -u origin main
           
-            cd ..
-
-            # Proje dizinini temizle (localden sil)
-            rm -rf "$PROJECT_SLUG"
-
-            echo "Successfully created project: $PROJECT_NAME"
+            cd ../..
 
             # Deployment adımı (eğer deploy_enabled true ise)
             if [ "$DEPLOY_ENABLED" == "true" ]; then
               echo "Deploying project $PROJECT_NAME to Kubernetes..."
+              
               # Kubeconfig ayarla
               echo "$KUBECONFIG" | base64 -d > kubeconfig.yaml
-              export KUBECONFIG=kubeconfig.yaml
+              export KUBECONFIG="$(pwd)/kubeconfig.yaml"
 
-              # Kustomize ile YAML’ları oluştur ve apply et
-              cd "$PROJECT_SLUG/kustomize" || { echo "Error: kustomize directory not found"; exit 1; }
-              kustomize build . | kubectl apply -f -
-              cd ../..
-
-              echo "Deployment completed for $PROJECT_NAME"
+              # Kustomize dizinine git
+              KUSTOMIZE_DIR="$PROJECT_PATH/kustomize"
+              
+              if [ -d "$KUSTOMIZE_DIR" ]; then
+                cd "$KUSTOMIZE_DIR" || { echo "Error: Cannot access kustomize directory"; exit 1; }
+                
+                echo "Building and applying Kubernetes resources..."
+                kubectl kustomize . | kubectl apply -f -
+                
+                cd -
+                echo "Deployment completed for $PROJECT_NAME"
+              else
+                echo "Warning: kustomize directory not found in $PROJECT_PATH. Skipping deployment."
+              fi
+              
+              # Kubeconfig dosyasını temizle
+              rm -f kubeconfig.yaml
             else
               echo "Deployment skipped for $PROJECT_NAME (deploy_enabled is false)"
             fi
+
+            # Proje dizinini temizle (localden sil)
+            cd ../..
+            rm -rf "$TEMP_DIR"
+
+            echo "Successfully created and processed project: $PROJECT_NAME"
           done
 
           echo "-----------------------------------------------------"
