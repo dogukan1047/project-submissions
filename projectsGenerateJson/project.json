@@ -49,5 +49,5 @@
     "memory_limit": "8Gi",
     "memory_request": "4Gi",
     "storage_size": "10Gi"
-  }                  
+  }                      
 ]
