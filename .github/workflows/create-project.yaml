@@ -37,12 +37,30 @@ jobs:
           fi
 
           echo "Processing $JSON_FILE"
+          echo "JSON file content:"
+          cat "$JSON_FILE"
+          echo ""
 
-          PROJECT_COUNT=$(jq length "$JSON_FILE")
+          # JSON formatını kontrol et (array mı object mi?)
+          IS_ARRAY=$(jq -r 'if type == "array" then "true" else "false" end' "$JSON_FILE")
 
+          if [ "$IS_ARRAY" == "true" ]; then
+            echo "Detected array format with multiple projects"
+            PROJECT_COUNT=$(jq 'length' "$JSON_FILE")
+            echo "Total projects to process: $PROJECT_COUNT"
+          else
+            echo "Detected single object format - wrapping in array"
+            # Tek objeyi array'e çevir
+            jq -s '.' "$JSON_FILE" > "${JSON_FILE}.tmp"
+            mv "${JSON_FILE}.tmp" "$JSON_FILE"
+            PROJECT_COUNT=1
+          fi
+
+          # Şimdi her zaman array formatında işle
           for ((i=0; i<$PROJECT_COUNT; i++)); do
-            echo "-----------------------------------------------------"
+            echo "====================================================="
             echo "Processing project index $i"
+            echo "====================================================="
 
             PROJECT_NAME=$(jq -r ".[$i].project_name" "$JSON_FILE")
             DESCRIPTION=$(jq -r ".[$i].description" "$JSON_FILE")
@@ -65,26 +83,43 @@ jobs:
               continue
             fi
 
+            echo "Project Configuration:"
+            echo "  Name: $PROJECT_NAME"
+            echo "  Type: $PROJECT_TYPE"
+            echo "  Description: $DESCRIPTION"
+            echo "  Author: $AUTHOR"
+            echo "  GPU: $USE_GPU (count: $GPU_COUNT)"
+            echo "  Deploy: $DEPLOY_ENABLED"
+
+            echo ""
             echo "Checking if repository '$GH_OWNER/$PROJECT_NAME' already exists..."
             if gh repo view "$GH_OWNER/$PROJECT_NAME" > /dev/null 2>&1; then
-              echo "Repository '$GH_OWNER/$PROJECT_NAME' already exists. Skipping this project."
+              echo "✗ Repository '$GH_OWNER/$PROJECT_NAME' already exists. Skipping."
               continue
             fi
-            echo "Repository does not exist. Proceeding with creation."
+            echo "✓ Repository does not exist. Proceeding with creation."
 
             case "$PROJECT_TYPE" in
               "llm") TEMPLATE="https://github.com/dogukan1047/llm-boilerplate.git";;
               "ml") TEMPLATE="https://github.com/dogukan1047/ml-boilerplate.git";;
               "custom") TEMPLATE="https://github.com/dogukan1047/custom-boilerplate.git";;
-              *) echo "Error: Invalid project_type '$PROJECT_TYPE' for project index $i. Skipping."; continue;;
+              *) 
+                echo "✗ Error: Invalid project_type '$PROJECT_TYPE' for project index $i. Skipping."
+                continue
+                ;;
             esac
 
+            echo "Using template: $TEMPLATE"
+
             # Geçici dizin oluştur
-            TEMP_DIR="temp_project_$i"
+            TEMP_DIR="temp_project_${i}_$$"
             mkdir -p "$TEMP_DIR"
 
+            echo ""
+            echo "Creating project from cookiecutter template..."
+            
             # Cookiecutter ile proje oluştur
-            cookiecutter --no-input "$TEMPLATE" \
+            if ! cookiecutter --no-input "$TEMPLATE" \
               --output-dir "$TEMP_DIR" \
               project_name="$PROJECT_NAME" \
               description="$DESCRIPTION" \
@@ -98,13 +133,20 @@ jobs:
               cpu_request="$CPU_REQUEST" \
               memory_limit="$MEMORY_LIMIT" \
               memory_request="$MEMORY_REQUEST" \
-              storage_size="$STORAGE_SIZE"
+              storage_size="$STORAGE_SIZE"; then
+              echo "✗ Error: Cookiecutter failed for project $PROJECT_NAME"
+              rm -rf "$TEMP_DIR"
+              exit 1
+            fi
+
+            echo "✓ Project created successfully"
 
             # Oluşturulan proje dizinini bul
-            PROJECT_SLUG=$(find "$TEMP_DIR" -maxdepth 1 -type d ! -name "$TEMP_DIR" -print -quit | xargs basename)
+            PROJECT_SLUG=$(find "$TEMP_DIR" -maxdepth 1 -mindepth 1 -type d -print -quit | xargs basename)
 
             if [ -z "$PROJECT_SLUG" ]; then
-              echo "Error: Could not find generated project directory for project $PROJECT_NAME"
+              echo "✗ Error: Could not find generated project directory"
+              echo "Contents of $TEMP_DIR:"
               ls -la "$TEMP_DIR"
               rm -rf "$TEMP_DIR"
               exit 1
@@ -114,58 +156,86 @@ jobs:
             PROJECT_PATH="$TEMP_DIR/$PROJECT_SLUG"
 
             # Yeni repo oluştur
-            echo "Creating GitHub repository..."
-            gh repo create "$GH_OWNER/$PROJECT_NAME" --public --description "$DESCRIPTION"
+            echo ""
+            echo "Creating GitHub repository: $GH_OWNER/$PROJECT_NAME"
+            if ! gh repo create "$GH_OWNER/$PROJECT_NAME" --public --description "$DESCRIPTION"; then
+              echo "✗ Error: Failed to create GitHub repository"
+              rm -rf "$TEMP_DIR"
+              exit 1
+            fi
+            echo "✓ Repository created"
 
             # Dosyaları push et
-            cd "$PROJECT_PATH" || { echo "Error: Directory $PROJECT_PATH not found"; exit 1; }
+            echo ""
+            echo "Initializing and pushing to GitHub..."
+            cd "$PROJECT_PATH" || { echo "✗ Error: Cannot access $PROJECT_PATH"; exit 1; }
             
-            echo "Initializing git repository..."
             git init -b main
             git add .
             git commit -m "Initial commit from boilerplate"
             git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GH_OWNER}/$PROJECT_NAME.git"
             
-            echo "Pushing to GitHub..."
-            git push -u origin main
-          
-            cd ../..
+            if ! git push -u origin main; then
+              echo "✗ Error: Failed to push to GitHub"
+              cd - > /dev/null
+              rm -rf "$TEMP_DIR"
+              exit 1
+            fi
+            
+            echo "✓ Code pushed to GitHub"
+            cd - > /dev/null
 
-            # Deployment adımı (eğer deploy_enabled true ise)
+            # Deployment adımı
             if [ "$DEPLOY_ENABLED" == "true" ]; then
+              echo ""
               echo "Deploying project $PROJECT_NAME to Kubernetes..."
               
               # Kubeconfig ayarla
-              echo "$KUBECONFIG" | base64 -d > kubeconfig.yaml
-              export KUBECONFIG="$(pwd)/kubeconfig.yaml"
+              KUBECONFIG_FILE="kubeconfig_${i}_$$.yaml"
+              if ! echo "$KUBECONFIG" | base64 -d > "$KUBECONFIG_FILE"; then
+                echo "✗ Error: Failed to decode KUBECONFIG"
+                rm -rf "$TEMP_DIR"
+                exit 1
+              fi
+              export KUBECONFIG="$(pwd)/$KUBECONFIG_FILE"
 
               # Kustomize dizinine git
               KUSTOMIZE_DIR="$PROJECT_PATH/kustomize"
               
               if [ -d "$KUSTOMIZE_DIR" ]; then
-                cd "$KUSTOMIZE_DIR" || { echo "Error: Cannot access kustomize directory"; exit 1; }
+                cd "$KUSTOMIZE_DIR" || { 
+                  echo "✗ Error: Cannot access kustomize directory"
+                  rm -f "$KUBECONFIG_FILE"
+                  rm -rf "$TEMP_DIR"
+                  exit 1
+                }
                 
                 echo "Building and applying Kubernetes resources..."
-                kubectl kustomize . | kubectl apply -f -
+                if kubectl kustomize . | kubectl apply -f -; then
+                  echo "✓ Deployment completed successfully"
+                else
+                  echo "✗ Warning: Deployment failed"
+                fi
                 
-                cd -
-                echo "Deployment completed for $PROJECT_NAME"
+                cd - > /dev/null
               else
-                echo "Warning: kustomize directory not found in $PROJECT_PATH. Skipping deployment."
+                echo "⚠ Warning: kustomize directory not found. Skipping deployment."
               fi
               
               # Kubeconfig dosyasını temizle
-              rm -f kubeconfig.yaml
+              rm -f "$KUBECONFIG_FILE"
             else
-              echo "Deployment skipped for $PROJECT_NAME (deploy_enabled is false)"
+              echo ""
+              echo "⊘ Deployment skipped (deploy_enabled is false)"
             fi
 
-            # Proje dizinini temizle (localden sil)
-            cd ../..
+            # Proje dizinini temizle
             rm -rf "$TEMP_DIR"
 
-            echo "Successfully created and processed project: $PROJECT_NAME"
+            echo ""
+            echo "✓ Successfully completed project: $PROJECT_NAME"
           done
 
-          echo "-----------------------------------------------------"
-          echo "Finished processing all projects in $JSON_FILE"
+          echo "====================================================="
+          echo "✓ Finished processing all projects"
+          echo "====================================================="
