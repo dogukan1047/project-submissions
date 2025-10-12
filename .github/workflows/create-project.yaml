@@ -147,7 +147,13 @@ jobs:
               # Kustomize ile YAML'ları oluştur ve apply et
               if [ -d "kustomize" ]; then
                 cd kustomize || { echo "Error: Cannot enter kustomize directory"; exit 1; }
-                kustomize build . | kubectl apply -f -
+                
+                # kubectl kustomize kullan (kubectl 1.14+)
+                kubectl apply -k . || {
+                  echo "Error: kubectl apply -k failed"
+                  exit 1
+                }
+                
                 cd ..
                 echo "Deployment completed for $PROJECT_NAME"
               else
