@@ -15,9 +15,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python and install dependencies
+      - name: Set up virtual environment and install dependencies
         run: |
-          python3 -m pip install --upgrade pip
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
           pip install cookiecutter jq
 
       - name: Process JSON file and create projects
@@ -26,6 +28,7 @@ jobs:
           GH_OWNER: "dogukan1047"
           KUBECONFIG: ${{ secrets.KUBECONFIG }}
         run: |
+          source venv/bin/activate
           JSON_FILE="projectsGenerateJson/project.json"
 
           if [ ! -f "$JSON_FILE" ]; then
